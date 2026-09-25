@@ -42,7 +42,7 @@ class CandidateResponse(BaseModel):
     max_salary: int | None
 
     skills: list[CandidateSkillCreate]
-    target_roles: list[CandidateRoleCreate]
+    roles: list[CandidateRoleCreate]
 
     model_config = {
         "from_attributes": True

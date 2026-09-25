@@ -6,7 +6,7 @@ from app.models.candidate import CandidateProfile
 from app.models.skill import CandidateSkill
 from app.models.role import CandidateRole
 from app.models.user import User
-from app.schemas.candidate import CandidateCreate, CandidateResponse
+from app.schemas.candidate import CandidateCreate, CandidateResponse, CandidateSkillCreate, CandidateRoleCreate
 
 
 router = APIRouter(
@@ -20,8 +20,8 @@ def create_candidate(
     candidate_data: CandidateCreate,
     db: Session = Depends(get_db),
 ):
-    # 1. Check whether the user exists
     try:
+        # 1. Check user
         user = db.get(User, candidate_data.user_id)
 
         if not user:
@@ -30,10 +30,12 @@ def create_candidate(
                 detail="User not found",
             )
 
-        # 2. Check whether this user already has a candidate profile
+        # 2. Check existing candidate
         existing_candidate = (
             db.query(CandidateProfile)
-            .filter(CandidateProfile.user_id == candidate_data.user_id)
+            .filter(
+                CandidateProfile.user_id == candidate_data.user_id
+            )
             .first()
         )
 
@@ -43,7 +45,7 @@ def create_candidate(
                 detail="Candidate profile already exists for this user",
             )
 
-        # 3. Create candidate profile
+        # 3. Create candidate
         candidate = CandidateProfile(
             user_id=candidate_data.user_id,
             full_name=candidate_data.full_name,
@@ -70,8 +72,8 @@ def create_candidate(
 
             db.add(skill)
 
-        # 5. Create target roles
-        for role_data in candidate_data.target_roles:
+        # 5. Create roles
+        for role_data in candidate_data.roles:
             role = CandidateRole(
                 candidate_id=candidate.id,
                 role_name=role_data.role_name,
@@ -80,13 +82,45 @@ def create_candidate(
 
             db.add(role)
 
-        # 6. Commit everything together
+        # 6. Flush so SQLAlchemy knows about everything
+        db.flush()
+
+        # 7. Explicitly validate/build response BEFORE commit
+        response = CandidateResponse(
+            id=candidate.id,
+            user_id=candidate.user_id,
+            full_name=candidate.full_name,
+            years_experience=candidate.years_experience,
+            summary=candidate.summary,
+            preferred_location=candidate.preferred_location,
+            remote_preference=candidate.remote_preference,
+            min_salary=candidate.min_salary,
+            max_salary=candidate.max_salary,
+            skills=[
+                CandidateSkillCreate(
+                    skill_name=skill.skill_name,
+                    skill_type=skill.skill_type,
+                    proficiency=skill.proficiency,
+                    years_experience=skill.years_experience,
+                )
+                for skill in candidate.skills
+            ],
+            roles=[
+                CandidateRoleCreate(
+                    role_name=role.role_name,
+                    priority=role.priority,
+                )
+                for role in candidate.roles
+            ],
+        )
+
+        # 8. Only commit AFTER response validation succeeds
         db.commit()
 
-        # 7. Reload relationships
-        db.refresh(candidate)
+        return response
 
-        return candidate
     except Exception:
+        # If anything fails before commit,
+        # all pending DB changes are rolled back.
         db.rollback()
         raise
